@@ -211,18 +211,49 @@ class Fpre {
 		void check(block * MAC, block * KEY, int length, int I) {
 			T * local_io = (I%2==0) ? io[I/2]: io2[I/2];
 
+			constexpr int BATCH_SIZE = 8;
+
+			block Buffer[2*BATCH_SIZE];
 			block * G = new block[length];
 			block * C = new block[length];
 			block * GR = new block[length];
 			bool * d = new bool[length];
 			bool * dR = new bool[length];
 	
+			
+			for (int i = length; i >= 0; i -= BATCH_SIZE) {
+				const int current_batch = std::min(i, BATCH_SIZE);
+				for (int ii = 1; ii <= current_batch; ++ii) {
+					const int global_i = i - ii;
+					C[global_i] = KEY[3 * global_i + 1] ^ MAC[3 * global_i + 1];
+					C[global_i] = C[global_i] ^ (select_mask[getLSB(MAC[3 * global_i + 1])] & Delta);
+
+					Buffer[2 * (current_batch - ii)] = KEY[3 * global_i];
+					Buffer[2 * (current_batch - ii) + 1] = KEY[3 * global_i] ^ Delta;
+				}
+
+				prps[I].permute_block(Buffer, 2 * current_batch);
+
+				for (int ii = 1; ii <= current_batch; ++ii) {
+					const int global_i = i - ii;
+
+					Buffer[2 * (current_batch - ii)] = Buffer[2 * (current_batch - ii)] ^ Buffer[2 * (current_batch - ii) + 1];
+					G[global_i] = Buffer[2 * (current_batch - ii)] ^ Delta;
+					G[global_i] = G[global_i] ^ C[global_i];
+
+				}
+			}
+			
+			/*
 			for (int i = 0; i < length; ++i) {
-				C[i] = KEY[3*i+1] ^ MAC[3*i+1];
-				C[i] = C[i] ^ (select_mask[getLSB(MAC[3*i+1])] & Delta);
-				G[i] = H2D(KEY[3*i], Delta, I);
+				C[i] = KEY[3 * i + 1] ^ MAC[3 * i + 1];
+				C[i] = C[i] ^ (select_mask[getLSB(MAC[3 * i + 1])] & Delta);
+				G[i] = H2D(KEY[3 * i], Delta, I);
 				G[i] = G[i] ^ C[i];
 			}
+			*/
+			
+
 			if(party == ALICE) {
 				local_io->send_data(G, sizeof(block)*length);
 				local_io->recv_data(GR, sizeof(block)*length);
@@ -231,6 +262,31 @@ class Fpre {
 				local_io->send_data(G, sizeof(block)*length);
 			}
 			local_io->flush();
+			
+			
+			for (int i = length; i >= 0; i -= BATCH_SIZE) {
+				const int current_batch = std::min(i, BATCH_SIZE);
+				block results[BATCH_SIZE];
+				for (int ii = 1; ii <= current_batch; ++ii) {
+					const int global_i = i - ii;
+					Buffer[2 * (current_batch - ii)] = MAC[3 * global_i];
+					Buffer[2 * (current_batch - ii) + 1] = KEY[3 * global_i];
+					results[(current_batch - ii)] = MAC[3 * global_i] ^ KEY[3 * global_i];
+				}
+
+				prps[I].permute_block(Buffer, 2 * current_batch);
+
+				for (int ii = 1; ii <= current_batch; ++ii) {
+					const int global_i = i - ii;
+					block S = results[(current_batch - ii)] ^ Buffer[2 * (current_batch - ii)] ^ Buffer[2 * (current_batch - ii) + 1];
+					S = S ^ MAC[3 * global_i + 2] ^ KEY[3 * global_i + 2];
+					S = S ^ (select_mask[getLSB(MAC[3 * global_i])] & (GR[global_i] ^ C[global_i]));
+					G[global_i] = S ^ (select_mask[getLSB(MAC[3 * global_i + 2])] & Delta);
+					d[global_i] = getL2SB(G[global_i]);
+				}
+			}
+			
+			/*
 			for(int i = 0; i < length; ++i) {
 				block S = H2(MAC[3*i], KEY[3*i], I);
 				S = S ^ MAC[3*i+2] ^ KEY[3*i+2];
@@ -238,6 +294,8 @@ class Fpre {
 				G[i] = S ^ (select_mask[getLSB(MAC[3*i+2])] & Delta);
 				d[i] = getL2SB(G[i]);
 			}
+			*/
+			
 
 			if(party == ALICE) {
 				local_io->send_bool(d, length);
@@ -259,6 +317,7 @@ class Fpre {
 				}
 				eq[I]->add_block(G[i]);
 			}
+
 			delete[] G;
 			delete[] GR;
 			delete[] C;

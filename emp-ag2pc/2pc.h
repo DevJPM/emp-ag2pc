@@ -201,6 +201,7 @@ class C2PC { public:
 				if(party == ALICE)
 					K[3] = K[3] ^ fpre->ZDelta;
 
+				// TODO: Batch this if out to allow better vectorization
 				if(party == ALICE) {
 					Hash(H, labels[cf->gates[4*i]], labels[cf->gates[4*i+1]], i);
 					for(int j = 0; j < 4; ++j) {
@@ -311,6 +312,7 @@ class C2PC { public:
 				} else if (cf->gates[4*i+3] == AND_GATE) {
 					int index = 2*mask_input[cf->gates[4*i]] + mask_input[cf->gates[4*i+1]];
 					block H[2];
+					// TODO Use dynamic batching here?
 					Hash(H, labels[cf->gates[4*i]], labels[cf->gates[4*i+1]], i, index);
 					GT[ands][index][0] = GT[ands][index][0] ^ H[0];
 					GT[ands][index][1] = GT[ands][index][1] ^ H[1];
